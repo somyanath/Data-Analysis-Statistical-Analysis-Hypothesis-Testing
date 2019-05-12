@@ -1,0 +1,158 @@
+---
+title: "Exploring the Session data"
+output:
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+  word_document: default
+---
+
+####_By Somyanath_
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(pastecs)
+```
+
+### Load data
+
+
+```{r load-data}
+data = read.csv("session_data_modified.csv", header = TRUE)
+```
+
+* * *
+
+##Research question
+
+**Research quesion :** Is there any relationship between Booking and any other variable?
+
+* * *
+
+##Exploratory data analysis
+
+First, let's clear the unwanted variables
+```{r}
+data$Session.End.Date = NULL
+data$Session.Start.Date = NULL
+```
+
+Now, let's modify the data a bit so that analysis can be performed on the data more efficiently. Subtracting the _Session.Start.Time_ from the _Session.End.Time_ the duration of a session is found. The duration is then converted into Minutes and rounded off in order to avoid huge variation in data.
+
+```{r}
+Session.Start.Hour = strptime(as.character(data$Session.Start.Time),
+                              "%H:%M:%OS")
+Session.End.Hour = strptime(as.character(data$Session.End.Time),
+                            "%H:%M:%OS")
+data <- data %>%
+  mutate(Session.Duration.Minutes = 
+           round(as.numeric((Session.End.Hour - Session.Start.Hour)/60)))
+```
+
+Now, lets check the structure of the variables we are going to perform our analysis on.
+```{r}
+data %>%
+  select(Booking, Clickouts, Session, Session.Duration.Minutes) %>%
+  str()
+```
+So, here the variables Booking & Clickouts has their data type as integer and Session & Session.Duration.Minutes as numerical.
+
+Now, Check the data in the variables in order to ensure that the there is no anomaly in the data and at the same time we can check the distribution of the data.
+
+```{r}
+data %>%
+  group_by(Booking) %>%
+  summarise(count = n())
+```
+
+```{r}
+data %>%
+  group_by(Clickouts) %>%
+  summarise(count = n())
+```
+
+```{r}
+data %>%
+  group_by(Session.Duration.Minutes) %>%
+  summarise(count = n())
+```
+
+From the above tables it is observed that after Session.Duration.Minutes have negative values. On examining those values it is found that they are just interpreted in a wrong way by the R compiler.
+If we convert the negative values of minutes into seconds and add it to 86400 seconds(number of seconds in 24 hours), we will get the seconds which are actually the correct value to replaced and then replace them.
+
+For example, 
+-1438*60 = -86280
+86400-86280 = 120 seconds (2 minutes)
+
+```{r}
+data$Session.Duration.Minutes[data$Session.Duration.Minutes==-1438] = 2
+data$Session.Duration.Minutes[data$Session.Duration.Minutes==-1437] = 3
+data$Session.Duration.Minutes[data$Session.Duration.Minutes==-1436] = 4
+data$Session.Duration.Minutes[data$Session.Duration.Minutes==-1435] = 5
+```
+
+Let's verify our replacement.
+
+```{r}
+data %>%
+  group_by(Session.Duration.Minutes) %>%
+  summarise(count = n())
+```
+
+Now, after corecting the negative values let's point our focus towards our Booking data.
+
+First, the distribution of the Booking data should be checked with respect to both the Clickouts and Session.Duration.Minutes variables.
+
+```{r}
+data %>%
+  group_by(Booking, Clickouts) %>%
+  summarise(count = n()) %>%
+  ggplot() + geom_bar(aes(x = Clickouts, y = count, 
+                          fill = Booking), stat = "identity") + 
+  guides(fill = guide_legend(title = "Booking")) + 
+  facet_grid(. ~ Booking) +
+  labs(x = "Clickouts", y = "Booking", 
+       title = "Variation of Booking w.r.t Clickouts")
+```
+
+```{r}
+data %>%
+  group_by(Booking, Session.Duration.Minutes) %>%
+  summarise(count = n()) %>%
+  ggplot() + geom_bar(aes(x = Session.Duration.Minutes, y = count, 
+                          fill = Booking), stat = "identity") + 
+  guides(fill = guide_legend(title = "Booking")) + 
+  facet_grid(. ~ Booking) +
+  labs(x = "Session Minutes", y = "Booking", 
+       title = "Variation of Booking w.r.t Session.Duration.Minutes")
+```
+
+It can see from both the plots above, that the Booking data is **normally distributed** and **follows a pattern in its variation with respect to _Clickouts_ and _Session.Duration.Minutes_.**
+
+The plots clearly shows that **most booking is done when the session minutes is 3 minutes.** The above plot also shows that **most of the bookings are done when the Clickouts are 2.**
+
+This finding suggests that there could be a relation between Booking and Session.Duration.Mintues/Clickouts. Let's conduct a Hypothesis testing to find out if there is any relation between Booking and the other two variables.
+
+According to hypothesis testing our null hypothesis(H0) and alternate hypothesis(H1) would be:
+
+**H0: There is no relation between Booking and (Session.Duration.Minutes/Clickouts).**  
+**H1: We fail to reject the assumption that there is a relation between Booking and (Session.Duration.Minutes/Clickouts).**  
+
+_**The most important thing to keep in mind is that Booking is the dependent variable (the variable whose value depends on other variables) and it should be treated as Categorical variable as it is stated in the problem statement that it is binary.**_
+
+```{r}
+logit_model = glm(Booking ~ Session.Duration.Minutes + Clickouts, data = data
+                  , family = binomial(link = "logit"))
+summary(logit_model)
+```
+
+For Session.Duration.Minutes the p-value is 0.178. In statistics the most suitable value of alpha is assumed to be 0.05, then the p-value is greater than alpha, so we fail to reject the null hypothesis.  That is, we do not have sufficient evidence to say that there is a relation between Booking and Session.Duration.Minutes.
+
+For Clickouts the p-value is 4.99*10^-7. As pointed out earlier, our alpha is 0.05, then the p-value is smaller than alpha, so we reject the null hypothesis. That is, we have sufficient evidence to say that there seems to be a relation between Booking and Clickouts.
+
+**So, our tests formulate that there is a relation between Booking and Clickouts data.**
